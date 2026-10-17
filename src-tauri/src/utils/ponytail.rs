@@ -313,6 +313,16 @@ pub fn matches_quota_summary_group(model_name_lower: &str, group_display_name_lo
     }
 }
 
+/// 判定配额桶或组名是否属于 Gemini 4 Argon 系列专属配额桶（如 `gemini-argon-wtu-weekly`）
+#[inline]
+pub fn is_argon_bucket(group_name: &str, bucket_id: &str) -> bool {
+    let lower_group = group_name.to_ascii_lowercase();
+    let lower_bucket = bucket_id.to_ascii_lowercase();
+    lower_group.contains("argon")
+        || lower_bucket.contains("argon")
+        || lower_bucket.contains("gemini-argon-wtu-weekly")
+}
+
 // ============================================================================
 // Gemini 4 Argon 第一性原理 ThinkingConfig 终审守门员 (Gatekeeper)
 // ============================================================================
@@ -497,6 +507,12 @@ mod tests {
 
     #[test]
     fn test_quota_summary_group_isolation() {
+        // is_argon_bucket 验证
+        assert!(is_argon_bucket("Gemini", "gemini-argon-wtu-weekly"));
+        assert!(is_argon_bucket("Argon Group", "default-bucket"));
+        assert!(!is_argon_bucket("Gemini", "gemini-3-pro-weekly"));
+        assert!(!is_argon_bucket("Claude", "claude-weekly"));
+
         // Argon 只匹配 Argon 桶，绝不匹配普通 Gemini 桶
         assert!(matches_quota_summary_group(
             "gemini-4-argon-high",

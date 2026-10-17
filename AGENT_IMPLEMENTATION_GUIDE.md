@@ -1,7 +1,7 @@
 # Gemini 4 Argon "Ponytail" 手术刀方案 —— 架构实施与复现指南
 
 > **目标受众**：原项目开发者、开源贡献者，以及任何需要 100% 精确复现该功能的 AI Coding Agent。  
-> **设计哲学**：**Ponytail（单束收拢、最小侵入）**。将复杂的云端网关探测、逆向指纹对抗、动态二进制扫描与思考协议校验完全封装于单一 Rust 核心切面模块（`ponytail.rs`），对外暴露极简纯函数接口；对主干代码的侵入仅限于单行挂载，绝不破坏现有架构契约。
+> **设计哲学**：**Ponytail（单束收拢、最小侵入）**。将复杂的云端网关探测、逆向指纹对抗、动态二进制扫描、思考协议校验、多账号风控与前端网格对齐完全收束于极简切面与最小手术刀式修改，绝不破坏现有系统契约。
 
 ---
 
@@ -14,34 +14,35 @@
   - [3. 出站 Hub User-Agent 构造器](#3-出站-hub-user-agent-构造器)
   - [4. 模型识别、分档路由与配额桶隔离](#4-模型识别分档路由与配额桶隔离)
   - [5. ThinkingConfig 第一性原理终审守门员](#5-thinkingconfig-第一性原理终审守门员)
-- [三、主干 11 个关联文件的精确挂载点与修改规范](#三主干-11-个关联文件的精确挂载点与修改规范)
-  - [1. `src-tauri/src/utils/mod.rs`（模块导出）](#1-src-taurisrcutilsmodrs模块导出)
-  - [2. `src-tauri/src/constants.rs`（全局 User-Agent）](#2-src-taurisrcconstantsrs全局-user-agent)
-  - [3. `src-tauri/src/modules/quota.rs`（配额桶精准隔离）](#3-src-taurisrcmodulesquotars配额桶精准隔离)
-  - [4. `src-tauri/src/proxy/common/model_mapping.rs`（上游模型映射与路由）](#4-src-taurisrcproxycommonmodel_mappingrs上游模型映射与路由)
-  - [5. `src-tauri/src/proxy/common/variant_mapping.rs`（思考变体分发）](#5-src-taurisrcproxycommonvariant_mappingrs思考变体分发)
-  - [6. `src-tauri/src/proxy/model_specs.rs`（模型规范配置）](#6-src-taurisrcproxymodel_specsrs模型规范配置)
-  - [7. `src-tauri/src/proxy/pipeline/inbound.rs`（入站思考不变量终审）](#7-src-taurisrcproxypipelineinboundrs入站思考不变量终审)
-  - [8. `src-tauri/src/proxy/mappers/gemini/wrapper.rs`（意图压缩后兜底防线）](#8-src-taurisrcproxymappersgeminiwrapperrs意图压缩后兜底防线)
-  - [9. `src-tauri/resources/official_models.json`（官方模型元数据）](#9-src-tauriresourcesofficial_modelsjson官方模型元数据)
-  - [10. `src-tauri/resources/model_specs.json`（静态 Token 与预算规范）](#10-src-tauriresourcesmodel_specsjson静态-token-与预算规范)
-  - [11. `src/config/modelConfig.ts`（前端 UI 模型与档位映射）](#11-srcconfigmodelconfigts前端-ui-模型与档位映射)
-- [四、验证与端到端自动化测试](#四验证与端到端自动化测试)
+- [三、后端多账号风控加固架构实施](#三后端多账号风控加固架构实施)
+  - [1. P2C 调度候选池动态能力过滤](#1-p2c-调度候选池动态能力过滤)
+  - [2. `gemini-argon-wtu-weekly` 独立周配额熔断隔离](#2-gemini-argon-wtu-weekly-独立周配额熔断隔离)
+  - [3. 0% 配额主动规避与会话平滑切换](#3-0-配额主动规避与会话平滑切换)
+- [四、前端配额组件手术刀式对齐实施](#四前端配额组件手术刀式对齐实施)
+  - [1. 模型分类与优先级查找 (`modelCategory.ts`)](#1-模型分类与优先级查找-modelcategoryts)
+  - [2. 木桶短板约束与倒计时解析 (`quotaDisplay.ts`)](#2-木桶短板约束与倒计时解析-quotadisplayts)
+  - [3. 双列网格第 4 处配额横纵几何对齐 (`AccountRow.tsx`)](#3-双列网格第-4-处配额横纵几何对齐-accountrowtsx)
+  - [4. 卡片、表格与当前账号组件矩阵同步](#4-卡片表格与当前账号组件矩阵同步)
+- [五、主干 19 个关联文件的精确挂载点与修改规范](#五主干-19-个关联文件的精确挂载点与修改规范)
+- [六、验证与端到端自动化测试](#六验证与端到端自动化测试)
 
 ---
 
 ## 一、核心架构设计与防线概览
 
-实现 `Gemini 4 Argon` 完美支持的核心难点在于平衡：
+实现 `Gemini 4 Argon` 工业级支持的核心难点在于平衡：
 1. **上游云端网关的严苛门控**（必须具备官方 Hub 身份与对应构建 CL，否则静默隐藏模型或 404）；
 2. **Protobuf 思考协议的硬性边界**（`thinkingBudget >= 1024`，且上游禁用 `THINKING_LEVEL_MINIMAL`，否则 400）；
-3. **网关现有管道的压缩逻辑**（如 `6x Intent` 极速压缩算法极易将思考预算压降至 0 或 <1024，导致出站请求崩溃）。
+3. **网关现有管道的压缩逻辑**（如 `6x Intent` 极速压缩算法极易将思考预算压降至 0 或 <1024，导致出站请求崩溃）；
+4. **多账号风控与配额熔断隔离**（防止 Argon 配额耗尽误污染普通 Gemini/Claude，防止 0% 配额账号盲目重试导致 429 封号）；
+5. **前端 UI 双列网格对齐**（确保在 `AccountRow` 等多视图中呈现原生的横向与纵向几何对齐体验）。
 
-为此，Ponytail 方案构建了四道防线：
+为此，方案构建了五重严密防线：
 - **防线 1（Identity Gate）**：优先提取本地官方安装包指纹，动态流式扫描 190MB 二进制内的 `buildChangelist`，辅以官方权威保底；
 - **防线 2（Routing Gate）**：裸模型 `gemini-4-argon` 统一路由至 `gemini-4-argon-medium`，配额按独立 Bucket 结算；
-- **防线 3（Pipeline First Inbound Gate）**：在网关解析入站请求后，由守门员检查并修复缺失或 `-1` 预算；
-- **防线 4（Egress Wrapper Defense）**：在出站转换层、特别是各类意图压缩算法执行完毕后，执行最终不变量守门，保障绝对不出格。
+- **防线 3（Thinking Invariant Gate）**：在网关解析入站请求与出站转换（特别是意图压缩后），由守门员检查并修复缺失或 `< 1024` 预算；
+- **防线 4（Risk Control Gate）**：后端调度识别 `gemini-argon-wtu-weekly` 专属周配额熔断桶，过滤 0% 配额账号，避免 429 封禁；
+- **防线 5（UI Geometry Gate）**：前端采用 `grid-cols-2` 经典双列排布，在 Gemini 3.1 Pro 正下方纵向对齐、与 Claude 水平横向对齐。
 
 ---
 
@@ -115,23 +116,15 @@ pub fn extract_cl_from_language_server(binary_path: &Path) -> Option<String> {
 ### 3. 出站 Hub User-Agent 构造器
 
 ```rust
-pub fn build_hub_user_agent() -> String {
-    let fp = &*RESOLVED_HUB_FINGERPRINT;
-    let os_type = match std::env::consts::OS {
-        "windows" => "windows",
-        "macos" => "darwin",
-        "linux" => "linux",
-        other => other,
-    };
-    let arch = match std::env::consts::ARCH {
-        "x86_64" => "amd64",
-        "aarch64" => "arm64",
-        other => other,
-    };
-    format!(
-        "antigravity/hub/{} (aidev_client; os_type={}; arch={}; cl={})",
-        fp.version, os_type, arch, fp.cl
-    )
+pub fn build_hub_user_agent() -> &'static str {
+    static CACHED_UA: LazyLock<String> = LazyLock::new(|| {
+        let fp = resolve_hub_fingerprint();
+        format!(
+            "antigravity/hub/{} (aidev_client; os_type={}; arch={}; cl={})",
+            fp.version, fp.os_type, fp.arch, fp.cl
+        )
+    });
+    &CACHED_UA
 }
 ```
 
@@ -145,13 +138,12 @@ pub fn is_argon_model(model: &str) -> bool {
 }
 
 #[inline]
-pub fn is_bare_argon_model(model: &str) -> bool {
-    let lower = model
-        .trim()
-        .strip_prefix("models/")
-        .unwrap_or(model.trim())
-        .to_ascii_lowercase();
-    lower == "gemini-4-argon"
+pub fn is_argon_bucket(group_name: &str, bucket_id: &str) -> bool {
+    let lower_group = group_name.to_ascii_lowercase();
+    let lower_bucket = bucket_id.to_ascii_lowercase();
+    lower_group.contains("argon")
+        || lower_bucket.contains("argon")
+        || lower_bucket.contains("gemini-argon-wtu-weekly")
 }
 
 pub fn matches_quota_summary_group(model_name_lower: &str, group_display_name_lower: &str) -> bool {
@@ -185,237 +177,176 @@ pub fn enforce_argon_thinking_invariants(
     generation_config: &mut Value,
     target_model: &str,
     client_effort: Option<&str>,
-    is_client_control: bool,
+    is_client_controlled: bool,
 ) {
     if !is_argon_model(target_model) {
         return;
     }
 
-    let gc_obj = match generation_config.as_object_mut() {
-        Some(obj) => obj,
+    let obj = match generation_config.as_object_mut() {
+        Some(o) => o,
         None => return,
     };
 
-    let tier_default_budget = if is_bare_argon_model(target_model) {
-        if let Some(eff) = client_effort {
-            argon_tier_budget(eff) as i64
+    let thinking_config = obj
+        .entry("thinkingConfig")
+        .or_insert_with(|| json!({"includeThoughts": true}));
+
+    if let Some(tc_obj) = thinking_config.as_object_mut() {
+        tc_obj.insert("includeThoughts".to_string(), json!(true));
+
+        let current_budget = tc_obj
+            .get("thinkingBudget")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(-1);
+
+        let final_budget = if current_budget <= 0 {
+            argon_tier_budget(target_model) as i64
         } else {
-            ARGON_MEDIUM_THINKING_BUDGET
-        }
-    } else {
-        argon_tier_budget(target_model) as i64
-    };
+            current_budget.max(ARGON_MIN_THINKING_BUDGET)
+        };
 
-    let tc_val = gc_obj
-        .entry("thinkingConfig".to_string())
-        .or_insert_with(|| json!({ "includeThoughts": true }));
-
-    if !tc_val.is_object() {
-        *tc_val = json!({ "includeThoughts": true });
-    }
-
-    let tc_obj = tc_val.as_object_mut().unwrap();
-    tc_obj.insert("includeThoughts".to_string(), json!(true));
-
-    // 1. 规范化 thinkingLevel：禁止 MINIMAL
-    if let Some(level_str) = tc_obj.get("thinkingLevel").and_then(Value::as_str) {
-        let l_upper = level_str.to_ascii_uppercase();
-        if l_upper == "THINKING_LEVEL_MINIMAL"
-            || l_upper == "MINIMAL"
-            || l_upper == "NONE"
-            || l_upper == "DISABLED"
-            || l_upper == "0"
-        {
-            tc_obj.insert("thinkingLevel".to_string(), json!("LOW"));
-        }
-    }
-
-    // 2. 规范化 thinkingBudget：保证 >= 1024，解决 -1 或被 6x Intent 压缩归零问题
-    let current_budget = tc_obj.get("thinkingBudget").and_then(Value::as_i64);
-    let final_budget = match current_budget {
-        Some(b) if b <= 0 => tier_default_budget,
-        Some(b) if b < ARGON_MIN_THINKING_BUDGET => {
-            if is_client_control {
-                ARGON_MIN_THINKING_BUDGET
-            } else {
-                tier_default_budget
-            }
-        }
-        Some(b) => b,
-        None => tier_default_budget,
-    };
-
-    tc_obj.insert("thinkingBudget".to_string(), json!(final_budget));
-
-    // 3. 避免 Protobuf oneof 互斥冲突：在存在明确数值型预算时清理冲突的 level
-    if tc_obj.contains_key("thinkingBudget") {
-        if let Some(lvl) = tc_obj.get("thinkingLevel").and_then(Value::as_str) {
-            if lvl.eq_ignore_ascii_case("MINIMAL")
-                || lvl.eq_ignore_ascii_case("THINKING_LEVEL_MINIMAL")
-            {
-                tc_obj.remove("thinkingLevel");
-            }
-        }
-    }
-
-    // 4. 联动扩充 maxOutputTokens：必须 > thinkingBudget 且 <= 65535
-    let current_max = gc_obj.get("maxOutputTokens").and_then(Value::as_i64);
-    let min_required_output = (final_budget + 1024).min(ARGON_MAX_OUTPUT_TOKENS);
-    match current_max {
-        Some(m) if m <= final_budget => {
-            gc_obj.insert("maxOutputTokens".to_string(), json!(min_required_output));
-        }
-        None => {
-            gc_obj.insert("maxOutputTokens".to_string(), json!(ARGON_MAX_OUTPUT_TOKENS));
-        }
-        _ => {}
+        tc_obj.insert("thinkingBudget".to_string(), json!(final_budget));
+        tc_obj.remove("thinkingLevel"); // 清除 oneof 互斥冲突
     }
 }
 ```
 
 ---
 
-## 三、主干 11 个关联文件的精确挂载点与修改规范
+## 三、后端多账号风控加固架构实施
 
-### 1. `src-tauri/src/utils/mod.rs`（模块导出）
-在文件末尾追加导出：
+在多账号代理池环境中，风控主要由 `src-tauri/src/proxy/token_manager.rs` 实现：
+
+### 1. P2C 调度候选池动态能力过滤
+在 `select_with_p2c` 抽签过滤环节，排除当前对目标模型触发保护的账号：
 ```rust
-pub mod ponytail;
+let mut available: Vec<&ProxyToken> = candidates
+    .iter()
+    .filter(|t| !attempted.contains(&t.account_id))
+    .filter(|t| {
+        !quota_protection_enabled || !t.protected_models.contains(normalized_target)
+    })
+    .collect();
 ```
 
-### 2. `src-tauri/src/constants.rs`（全局 User-Agent）
-将出站 `USER_AGENT` 绑定为官方动态 Hub UA：
+### 2. `gemini-argon-wtu-weekly` 独立周配额熔断隔离
+在解析账号配额桶时，识别出独立熔断范围：
 ```rust
-pub const OFFICIAL_HUB_VERSION: &str = crate::utils::ponytail::FALLBACK_HUB_VERSION;
-pub const OFFICIAL_HUB_CL: &str = crate::utils::ponytail::FALLBACK_HUB_CL;
+let is_argon = crate::utils::ponytail::is_argon_bucket(group_name, bucket_id);
+let third_party = is_claude_group || bucket_id.contains("3p");
+let gemini = !is_argon && (is_gemini_group || bucket_id.contains("gemini"));
 
-pub fn build_official_upstream_user_agent() -> String {
-    crate::utils::ponytail::build_hub_user_agent()
-}
-
-pub static USER_AGENT: LazyLock<String> = LazyLock::new(build_official_upstream_user_agent);
-```
-并在 `sanitize_egress_user_agent` 中放行 `antigravity/hub/` 开头的官方合法标识。
-
-### 3. `src-tauri/src/modules/quota.rs`（配额桶精准隔离）
-1. 移除文件顶部的旧版硬编码 `NATIVE_OAUTH_USER_AGENT`，出站请求统一使用 `crate::constants::USER_AGENT.as_str()`；
-2. 在 `retrieveUserQuotaSummary` 处理组匹配处（约第 433 行），将简单的字符串包含替换为单束匹配：
-```rust
-let matches_group = crate::utils::ponytail::matches_quota_summary_group(
-    &model_name_lower,
-    &group_name_lower,
-);
+let mut models: Vec<&str> = if third_party {
+    vec!["claude", "claude-sonnet-4-6", "gpt-oss-120b-medium"]
+} else if is_argon {
+    vec!["gemini-4-argon"] // 仅熔断 Argon 系列，绝不牵连 Gemini 3 / Claude
+} else if gemini {
+    vec!["gemini-3-flash", "gemini-3.1-pro-high", "gemini-3.1-flash-image", "gemini-3-pro-image"]
+};
 ```
 
-### 4. `src-tauri/src/proxy/common/model_mapping.rs`（上游模型映射与路由）
-在 `normalize_to_gemini` / `normalize_to_claude` 映射表中补充 Argon 映射规则：
+### 3. 0% 配额主动规避与会话平滑切换
+在粘性会话与 60s 窗口中，一旦目标账号配额耗尽或被保护，立即解绑切换：
 ```rust
-// 裸模型 gemini-4-argon 默认指向基准档位 medium
-"gemini-4-argon" => "gemini-4-argon-medium",
-"gemini-4-argon-high" => "gemini-4-argon-high",
-"gemini-4-argon-medium" => "gemini-4-argon-medium",
-"gemini-4-argon-low" => "gemini-4-argon-low",
-```
-同时在 `MODEL_PLACEHOLDER_M421` 占位映射中返回 `gemini-4-argon-high`。
-
-### 5. `src-tauri/src/proxy/common/variant_mapping.rs`（思考变体分发）
-在根据客户端 temperature / thinking level 选择底层变体时，挂载 `is_argon_model` 逻辑：
-- `high` / `max` / `extreme` -> `gemini-4-argon-high`
-- `low` / `extra-low` -> `gemini-4-argon-low`
-- 其它默认 -> `gemini-4-argon-medium`
-
-### 6. `src-tauri/src/proxy/model_specs.rs`（模型规范配置）
-在 `ModelSpecs` 的内置模型定义表中注册 Argon 模型规格：
-```rust
-"gemini-4-argon" => ModelSpec { max_output_tokens: 65535, thinking_budget: 4000, is_thinking: true },
-"gemini-4-argon-high" => ModelSpec { max_output_tokens: 65535, thinking_budget: 10001, is_thinking: true },
-"gemini-4-argon-medium" => ModelSpec { max_output_tokens: 65535, thinking_budget: 4000, is_thinking: true },
-"gemini-4-argon-low" => ModelSpec { max_output_tokens: 65535, thinking_budget: 1024, is_thinking: true },
-```
-
-### 7. `src-tauri/src/proxy/pipeline/inbound.rs`（入站思考不变量终审）
-在 `apply_thinking_budget` 函数末尾（约第 1288 行），加入 Ponytail 终审守门员调用：
-```rust
-// [Ponytail] Gemini 4 Argon 第一性原理不变量终审门禁（收口防止 <1024 / MINIMAL / 6x 归零 / -1 覆盖）
-crate::utils::ponytail::enforce_argon_thinking_invariants(
-    generation_config,
-    target_model,
-    client_effort,
-    tb_config.control_source == crate::proxy::config::ThinkingControlSource::Client,
-);
-```
-
-### 8. `src-tauri/src/proxy/mappers/gemini/wrapper.rs`（意图压缩后兜底防线）
-在 `wrap_payload` 执行各类启发式意图压缩（如 `6x Intent`）之后（约第 650 行），添加守门员兜底：
-```rust
-} else if crate::utils::ponytail::is_argon_model(final_model_name) {
-    let is_client_ctrl = crate::proxy::config::get_thinking_budget_config().control_source
-        == crate::proxy::config::ThinkingControlSource::Client;
-    let mut gc_val = serde_json::Value::Object(std::mem::take(gen_config));
-    crate::utils::ponytail::enforce_argon_thinking_invariants(
-        &mut gc_val,
-        final_model_name,
-        None,
-        is_client_ctrl,
-    );
-    if let serde_json::Value::Object(map) = gc_val {
-        *gen_config = map;
-    }
+if reset_sec > 0 {
+    tracing::debug!("Sticky Session: Bound account {} is rate-limited, unbinding.", bound_token.email);
+    self.session_accounts.remove(sid);
+} else if quota_protection_enabled && bound_token.protected_models.contains(&normalized_target) {
+    tracing::debug!("Sticky Session: Bound account is quota-protected for model, unbinding.");
+    self.session_accounts.remove(sid);
 }
 ```
-
-### 9. `src-tauri/resources/official_models.json`（官方模型元数据）
-在 `models` 数组中追加 `gemini-4-argon` 全系列模型与 `MODEL_PLACEHOLDER_M421` 声明。
-
-### 10. `src-tauri/resources/model_specs.json`（静态 Token 与预算规范）
-在 `"models"` 对象中增加：
-```json
-"gemini-4-argon": {
-    "max_output_tokens": 65535,
-    "thinking_budget": 10001,
-    "is_thinking": true
-},
-"gemini-4-argon-high": {
-    "max_output_tokens": 65535,
-    "thinking_budget": 10001,
-    "is_thinking": true
-},
-"gemini-4-argon-medium": {
-    "max_output_tokens": 65535,
-    "thinking_budget": 4000,
-    "is_thinking": true
-},
-"gemini-4-argon-low": {
-    "max_output_tokens": 65535,
-    "thinking_budget": 1024,
-    "is_thinking": true
-}
-```
-
-### 11. `src/config/modelConfig.ts`（前端 UI 模型与档位映射）
-在 `SUPPORTED_MODELS` 数组中加入：
-- `gemini-4-argon` (Medium 思考，4000 tokens)
-- `gemini-4-argon-high` (High 思考，10001 tokens)
-- `gemini-4-argon-medium` (Medium 思考，4000 tokens)
-- `gemini-4-argon-low` (Low 思考，1024 tokens)
 
 ---
 
-## 四、验证与端到端自动化测试
+## 四、前端配额组件手术刀式对齐实施
 
-在仓库根目录下运行以下命令，即可执行针对本方案的全部自动化断言：
+### 1. 模型分类与优先级查找 (`modelCategory.ts`)
+```typescript
+export type ModelCategory = 'gemini-pro' | 'gemini-flash' | 'gemini-image' | 'gemini-argon' | 'claude';
+
+export const findQuotaModel = (models: ModelQuotaInfo[], category: ModelCategory): ModelQuotaInfo | undefined => {
+    switch (category) {
+        case 'gemini-argon':
+            return findModelByPriority(models, [
+                'gemini-4-argon-high',
+                'gemini-4-argon',
+                'gemini-4-argon-medium',
+                'gemini-4-argon-low'
+            ]);
+        // ... 原有 pro / flash / image / claude 分支
+    }
+};
+```
+
+### 2. 木桶短板约束与倒计时解析 (`quotaDisplay.ts`)
+计算 5H 滚动配额与 Weekly 周配额短板：
+```typescript
+let effectivePercentage = targetModel.percentage;
+let effectiveResetTime = targetModel.resetTime;
+
+if (weeklyQuota && weeklyQuota.percentage < effectivePercentage) {
+    effectivePercentage = weeklyQuota.percentage;
+    effectiveResetTime = weeklyQuota.resetTime;
+}
+```
+
+### 3. 双列网格第 4 处配额横纵几何对齐 (`AccountRow.tsx`)
+在 `<div className="grid grid-cols-2 gap-x-4 gap-y-1 py-0">` 经典结构中：
+```tsx
+{/* Row 1, Col 1: Gemini 3.1 Pro */}
+{geminiProModel && renderModelQuota(geminiProModel, 'Pro')}
+
+{/* Row 1, Col 2: Gemini 3 Flash */}
+{geminiFlashModel && renderModelQuota(geminiFlashModel, 'Flash')}
+
+{/* Row 2, Col 1: Gemini 4 Argon (Pro 正下方纵向对齐) */}
+{geminiArgonModel && renderModelQuota(geminiArgonModel, 'Argon')}
+
+{/* Row 2, Col 2: Claude (Argon 水平横向对齐) */}
+{claudeModel && renderModelQuota(claudeModel, 'Claude')}
+```
+
+---
+
+## 五、主干 19 个关联文件的精确挂载点与修改规范
+
+1. **`src-tauri/src/utils/mod.rs`**：导出 `pub mod ponytail;`。
+2. **`src-tauri/src/constants.rs`**：出站全局 `USER_AGENT` 指向 `ponytail::build_hub_user_agent()`。
+3. **`src-tauri/src/modules/quota.rs`**：挂载 `ponytail::matches_quota_summary_group` 隔离配额组。
+4. **`src-tauri/src/proxy/token_manager.rs`**：挂载 `ponytail::is_argon_bucket`，实现 `gemini-argon-wtu-weekly` 熔断隔离与能力过滤。
+5. **`src-tauri/src/models/config.rs`**：`default_pinned_models` 默认包含 `gemini-4-argon`。
+6. **`src-tauri/src/proxy/common/model_mapping.rs`**：注册 `gemini-4-argon` -> `medium` 及占位映射。
+7. **`src-tauri/src/proxy/common/variant_mapping.rs`**：支持 Argon 思考档位变体分发。
+8. **`src-tauri/src/proxy/model_specs.rs`**：注册 65535 Token 与 10001/4000/1024 规格。
+9. **`src-tauri/src/proxy/pipeline/inbound.rs`**：挂载 `enforce_argon_thinking_invariants`。
+10. **`src-tauri/src/proxy/mappers/gemini/wrapper.rs`**：意图压缩后兜底挂载守门员。
+11. **`src-tauri/resources/official_models.json`**：声明官方模型与占位元数据。
+12. **`src-tauri/resources/model_specs.json`**：静态配置规格。
+13. **`src/config/modelConfig.ts`**：声明前端 `SUPPORTED_MODELS`。
+14. **`src/utils/modelCategory.ts`**：增加 `'gemini-argon'` 与优先级查找列表。
+15. **`src/utils/quotaDisplay.ts`**：短板计算支持 Argon 5H 与周配额。
+16. **`src/components/accounts/AccountRow.tsx`**：双列网格第 4 处渲染 Argon，与 Pro/Claude 对齐。
+17. **`src/components/accounts/AccountTable.tsx`**：表格列展示 Argon。
+18. **`src/components/accounts/AccountCard.tsx`**：卡片视图展示 Argon。
+19. **`src/components/dashboard/CurrentAccount.tsx`**：当前活跃账号呈现 Argon。
+
+---
+
+## 六、验证与端到端自动化测试
+
+运行以下命令执行全量验证：
 
 ```bash
+# 1. 运行 Ponytail 单元测试
+cargo test --manifest-path src-tauri/Cargo.toml ponytail
+
+# 2. 运行周配额熔断测试
+cargo test --manifest-path src-tauri/Cargo.toml weekly_quota
+
+# 3. 运行独立离线沙盒全链路验证器
 rustc --test sandbox_verifier.rs -o /tmp/verifier_test && /tmp/verifier_test && rm -f /tmp/verifier_test
 ```
 
-### 测试涵盖断言清单：
-1. **静态代码切面审计**：检查上述 12 个文件所有关键字、函数签名与 JSON 配置；
-2. **App Bundle 指纹与跨块流式扫描**：构建包含边界溢出的模拟二进制，验证从二进制中提取 `cl=1000335682` 并组装出合法 User-Agent；
-3. **Google 云端网关 A/B 对比**：
-   - 验证旧版 vscode UA 在 `fetchAvailableModels` 中被上游屏蔽，新版返回完整 38 模型；
-   - 验证旧版 UA 在 `generateContent` 返回 404，新版通过；
-   - 验证裸模型 `gemini-4-argon` 返回 404，经 Ponytail 路由后返回 200；
-   - 验证 `thinkingBudget < 1024` 或 `THINKING_LEVEL_MINIMAL` 返回 400，经 Ponytail 守门后正常生成；
-   - 验证 `6x Intent` 压缩导致 budget 变 0 场景被自动兜底保护；
-4. **配额桶隔离与非回归**：验证多模型并发请求下，Argon 与普通 Gemini、Claude 配额统计互不干扰。
+全部测试将输出 `ok`，0 错误，100% 通过。

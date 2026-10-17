@@ -1,5 +1,5 @@
 diff --git a/src-tauri/resources/model_specs.json b/src-tauri/resources/model_specs.json
-index 90ddaaa..7ab9fc6 100644
+index 90ddaaae..7ab9fc6c 100644
 --- a/src-tauri/resources/model_specs.json
 +++ b/src-tauri/resources/model_specs.json
 @@ -1,5 +1,25 @@
@@ -37,7 +37,7 @@ index 90ddaaa..7ab9fc6 100644
          "gpt-4o-mini": "gemini-3.8-flash-high",
          "gpt-4": "gemini-3.8-flash-high",
 diff --git a/src-tauri/resources/official_models.json b/src-tauri/resources/official_models.json
-index 17911b2..7ad6200 100644
+index 17911b29..7ad62005 100644
 --- a/src-tauri/resources/official_models.json
 +++ b/src-tauri/resources/official_models.json
 @@ -1,5 +1,69 @@
@@ -111,7 +111,7 @@ index 17911b2..7ad6200 100644
        "displayName": "Gemini 3.8 Flash (Low)",
        "supportsImages": true,
 diff --git a/src-tauri/src/constants.rs b/src-tauri/src/constants.rs
-index bd50209..8ea175b 100644
+index bd50209b..8ea175bf 100644
 --- a/src-tauri/src/constants.rs
 +++ b/src-tauri/src/constants.rs
 @@ -216,31 +216,16 @@ pub static SESSION_ID: LazyLock<String> = LazyLock::new(|| uuid::Uuid::new_v4().
@@ -150,8 +150,33 @@ index bd50209..8ea175b 100644
  }
  
  /// Official Antigravity upstream User-Agent
+diff --git a/src-tauri/src/models/config.rs b/src-tauri/src/models/config.rs
+index 4433ed3c..b8efd2c7 100644
+--- a/src-tauri/src/models/config.rs
++++ b/src-tauri/src/models/config.rs
+@@ -102,6 +102,7 @@ pub struct QuotaProtectionConfig {
+ fn default_monitored_models() -> Vec<String> {
+     vec![
+         "claude".to_string(),
++        "gemini-4-argon".to_string(),
+         "gemini-3-pro-high".to_string(),
+         "gemini-3-flash".to_string(),
+         "gemini-3.1-flash-image".to_string(),
+@@ -134,10 +135,10 @@ pub struct PinnedQuotaModelsConfig {
+ 
+ fn default_pinned_models() -> Vec<String> {
+     vec![
+-        "gemini-3-pro-high".to_string(),
+-        "gemini-3-flash".to_string(),
+         "gemini-3.1-flash-image".to_string(),
++        "gemini-3-pro-high".to_string(),
+         "claude-sonnet-4-6-thinking".to_string(),
++        "gemini-4-argon".to_string(),
+     ]
+ }
+ 
 diff --git a/src-tauri/src/modules/quota.rs b/src-tauri/src/modules/quota.rs
-index 9f7f0f2..b09bb75 100644
+index 9f7f0f24..b09bb75e 100644
 --- a/src-tauri/src/modules/quota.rs
 +++ b/src-tauri/src/modules/quota.rs
 @@ -151,7 +151,7 @@ async fn fetch_project_id(
@@ -211,7 +236,7 @@ index 9f7f0f2..b09bb75 100644
              .json(&payload)
              .send()
 diff --git a/src-tauri/src/proxy/common/model_mapping.rs b/src-tauri/src/proxy/common/model_mapping.rs
-index 19cf54f..9fa8d9f 100644
+index 19cf54f5..9fa8d9f5 100644
 --- a/src-tauri/src/proxy/common/model_mapping.rs
 +++ b/src-tauri/src/proxy/common/model_mapping.rs
 @@ -45,6 +45,11 @@ static CLAUDE_TO_GEMINI: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|
@@ -263,7 +288,7 @@ index 19cf54f..9fa8d9f 100644
      // The quota API exposes `gemini-3.1-flash-image` separately, so grouping it under
      // `gemini-3-pro-image` makes available Flash image quota look exhausted.
 diff --git a/src-tauri/src/proxy/common/variant_mapping.rs b/src-tauri/src/proxy/common/variant_mapping.rs
-index 8c4c934..90e76e0 100644
+index 8c4c9345..90e76e0b 100644
 --- a/src-tauri/src/proxy/common/variant_mapping.rs
 +++ b/src-tauri/src/proxy/common/variant_mapping.rs
 @@ -223,8 +223,12 @@ pub fn resolve_with_tier(
@@ -336,7 +361,7 @@ index 8c4c934..90e76e0 100644
          return Some(RealModelSpec {
              id,
 diff --git a/src-tauri/src/proxy/mappers/gemini/wrapper.rs b/src-tauri/src/proxy/mappers/gemini/wrapper.rs
-index 35530e5..880fd7a 100644
+index 35530e54..880fd7a0 100644
 --- a/src-tauri/src/proxy/mappers/gemini/wrapper.rs
 +++ b/src-tauri/src/proxy/mappers/gemini/wrapper.rs
 @@ -647,6 +647,19 @@ pub fn wrap_request_v2(
@@ -360,7 +385,7 @@ index 35530e5..880fd7a 100644
      }
  
 diff --git a/src-tauri/src/proxy/model_specs.rs b/src-tauri/src/proxy/model_specs.rs
-index 4dd7b46..165ebe8 100644
+index 4dd7b46f..69393a1b 100644
 --- a/src-tauri/src/proxy/model_specs.rs
 +++ b/src-tauri/src/proxy/model_specs.rs
 @@ -59,11 +59,17 @@ pub fn get_max_output_tokens(model_id: &str, token: Option<&ProxyToken>) -> u64
@@ -408,8 +433,37 @@ index 4dd7b46..165ebe8 100644
      let is_pro = lower.contains("pro");
  
      // 由客户端 effort / thinkingLevel 接管：
+@@ -402,6 +414,28 @@ pub fn is_claude_v5_or_above(model: &str) -> bool {
+     false
+ }
+ 
++/// 检查是否为 Gemini >= 4.0 (含 Gemini 4 Argon 系列) 高阶模型
++pub fn is_gemini_v4_or_above(model: &str) -> bool {
++    if crate::utils::ponytail::is_argon_model(model) {
++        return true;
++    }
++    let lower = model.to_lowercase();
++    if !lower.contains("gemini") {
++        return false;
++    }
++    if let Some(idx) = lower.find("gemini-") {
++        let rest = &lower[idx + "gemini-".len()..];
++        let version_part: String = rest
++            .chars()
++            .take_while(|c| c.is_ascii_digit() || *c == '.')
++            .collect();
++        if let Ok(ver) = version_part.parse::<f32>() {
++            return ver >= 4.0;
++        }
++    }
++    lower.contains("gemini-4") || lower.contains("gemini-5")
++}
++
+ /// 检查是否为 Claude >= 5.0 的裸模型（无 -low, -medium, -high 等档位或特性后缀）
+ pub fn is_bare_claude_tiered_model(model: &str) -> bool {
+     let lower = model.to_lowercase();
 diff --git a/src-tauri/src/proxy/pipeline/inbound.rs b/src-tauri/src/proxy/pipeline/inbound.rs
-index ff5129b..9c12144 100644
+index ff5129b4..9c12144e 100644
 --- a/src-tauri/src/proxy/pipeline/inbound.rs
 +++ b/src-tauri/src/proxy/pipeline/inbound.rs
 @@ -1284,6 +1284,14 @@ impl InboundThinkingPipeline {
@@ -427,8 +481,121 @@ index ff5129b..9c12144 100644
          generation_config
              .get("thinkingConfig")
              .and_then(|t| t.get("thinkingBudget"))
+diff --git a/src-tauri/src/proxy/token_manager.rs b/src-tauri/src/proxy/token_manager.rs
+index cd4947f1..6e7d768f 100644
+--- a/src-tauri/src/proxy/token_manager.rs
++++ b/src-tauri/src/proxy/token_manager.rs
+@@ -2053,12 +2053,13 @@ impl TokenManager {
+ 
+         // [NEW] 1. 动态能力过滤 (Capability Filter)
+ 
+-        // 针对 Claude >= 5.0 系列高级模型（例如 5.5 Sonnet / 5.5 Opus 等）：
++        // 针对 Claude >= 5.0 及 Gemini >= 4.0 (Gemini 4 Argon) 系列高级模型：
+         // 优先使用账号上游下发的配额模型目录 (model_limits / model_quotas) 进行动态能力判断；
+-        // 当存在明确具备该模型能力的账号时，严格只保留具备能力的账号。
++        // 当存在明确具备该模型能力的账号时，严格只保留具备能力的账号，避免无权限账号盲调触发 403/404 风控。
+         // 若所有账号皆尚未拉取到明确的模型目录（例如冷启动或离线），则平滑降级为 PRO / ULTRA 订阅层门禁兜底。
+-        let is_advanced_claude = crate::proxy::model_specs::is_claude_v5_or_above(target_model);
+-        if is_advanced_claude {
++        let is_advanced_model = crate::proxy::model_specs::is_claude_v5_or_above(target_model)
++            || crate::proxy::model_specs::is_gemini_v4_or_above(target_model);
++        if is_advanced_model {
+             let before_tier = tokens_snapshot.len();
+ 
+             // 1.1 先行保留符合基本高级订阅资质的账号 (PRO / ULTRA)
+@@ -2074,17 +2075,18 @@ impl TokenManager {
+             if tokens_snapshot.is_empty() {
+                 if before_tier > 0 {
+                     tracing::warn!(
+-                        "Claude >= 5.0 requires PRO or ULTRA subscription, but no PRO/ULTRA accounts available in pool"
++                        "Advanced model '{}' requires PRO or ULTRA subscription, but no PRO/ULTRA accounts available in pool",
++                        target_model
+                     );
+                     return Err(
+-                        "Claude >= 5.0 requires PRO or ULTRA subscription, but no PRO/ULTRA accounts are available"
++                        "Advanced model requires PRO or ULTRA subscription, but no PRO/ULTRA accounts are available"
+                             .to_string(),
+                     );
+                 }
+                 return Err("Token pool is empty".to_string());
+             }
+ 
+-            // 1.2 动态能力过滤：检测是否有账号已通过定时刷新/在线同步获得了该 5.x 模型的实际可用配额
++            // 1.2 动态能力过滤：检测是否有账号已通过定时刷新/在线同步获得了该高阶模型的实际可用配额
+             // 同时必须排除因历史 404/403 处于临时单模型熔断期的账号
+             let accounts_with_capability: Vec<_> = tokens_snapshot
+                 .iter()
+@@ -2125,13 +2127,26 @@ impl TokenManager {
+                 .unwrap_or_else(|| target_model.to_string());
+ 
+         // 仅保留明确拥有该模型配额的账号
+-        // 这一步确保了 "保证有模型才可以进入轮询"，特别是对 Opus 4.6 等高端模型
++        // 这一步确保了 "保证有模型才可以进入轮询"，特别是对 Opus 4.6 / Gemini 4 Argon 等高端模型
+         let candidate_count_before = tokens_snapshot.len();
+ 
+         // 此处假设所有受支持的模型都会出现在 model_quotas 中
+         // 如果 API 返回的配额信息不完整，可能会导致误杀，但为了严格性，我们执行此过滤
+         tokens_snapshot.retain(|t| t.model_quotas.contains_key(&normalized_target));
+ 
++        // [Ponytail 风控加固] 对于 Gemini 4 Argon 独立周配额桶模型：
++        // 若池中存在配额 > 0% 的可用账号，提前剔除配额已耗尽 (<= 0%) 的账号，防止 0% 账号在粘性会话或 60s 窗口中继续硬撞上游 429 风控
++        if crate::utils::ponytail::is_argon_model(&normalized_target) {
++            let positive_quota_accounts: Vec<_> = tokens_snapshot
++                .iter()
++                .filter(|t| t.model_quotas.get(&normalized_target).copied().unwrap_or(0) > 0)
++                .cloned()
++                .collect();
++            if !positive_quota_accounts.is_empty() {
++                tokens_snapshot = positive_quota_accounts;
++            }
++        }
++
+         if tokens_snapshot.is_empty() {
+             if candidate_count_before > 0 {
+                 // 如果过滤前有账号，过滤后没了，说明所有账号都没有该模型的配额
+@@ -2153,8 +2168,8 @@ impl TokenManager {
+                 return priority_cmp;
+             }
+ 
+-            // 对于 Claude >= 5.0：明确包含该具体模型（由定时刷新下发）的账号获得最高调度优先级
+-            if is_advanced_claude {
++            // 对于 Claude >= 5.0 及 Gemini >= 4.0 (Argon)：明确包含该具体模型（由定时刷新下发）的账号获得最高调度优先级
++            if is_advanced_model {
+                 let has_cap_a = Self::token_supports_advanced_model(a, target_model);
+                 let has_cap_b = Self::token_supports_advanced_model(b, target_model);
+                 if has_cap_a != has_cap_b {
+@@ -4149,10 +4164,14 @@ impl TokenManager {
+                         } else {
+                             None
+                         };
++                        let is_argon =
++                            crate::utils::ponytail::is_argon_bucket(group_name, bucket_id);
+                         let third_party = is_claude_group || bucket_id.contains("3p");
+-                        let gemini = is_gemini_group || bucket_id.contains("gemini");
++                        let gemini = !is_argon && (is_gemini_group || bucket_id.contains("gemini"));
+                         let mut models: Vec<&str> = if third_party {
+                             vec!["claude", "claude-sonnet-4-6", "gpt-oss-120b-medium"]
++                        } else if is_argon {
++                            vec!["gemini-4-argon"]
+                         } else if gemini {
+                             vec![
+                                 "gemini-3-flash",
+@@ -4171,8 +4190,12 @@ impl TokenManager {
+                                     .filter(|name| {
+                                         if third_party {
+                                             name.starts_with("claude") || name.starts_with("gpt")
++                                        } else if is_argon {
++                                            crate::utils::ponytail::is_argon_model(name)
+                                         } else {
+-                                            gemini && name.starts_with("gemini")
++                                            gemini
++                                                && name.starts_with("gemini")
++                                                && !crate::utils::ponytail::is_argon_model(name)
+                                         }
+                                     }),
+                             );
 diff --git a/src-tauri/src/utils/mod.rs b/src-tauri/src/utils/mod.rs
-index ecd5a8b..bd0df4e 100644
+index ecd5a8b3..bd0df4e5 100644
 --- a/src-tauri/src/utils/mod.rs
 +++ b/src-tauri/src/utils/mod.rs
 @@ -2,6 +2,8 @@ pub mod command;
@@ -442,10 +609,10 @@ index ecd5a8b..bd0df4e 100644
 +
 diff --git a/src-tauri/src/utils/ponytail.rs b/src-tauri/src/utils/ponytail.rs
 new file mode 100644
-index 0000000..c8b9ccf
+index 00000000..333b8b97
 --- /dev/null
 +++ b/src-tauri/src/utils/ponytail.rs
-@@ -0,0 +1,859 @@
+@@ -0,0 +1,875 @@
 +//! Ponytail (单束收拢、最小侵入) 核心切面模块
 +//!
 +//! 设计原则：
@@ -761,6 +928,16 @@ index 0000000..c8b9ccf
 +    }
 +}
 +
++/// 判定配额桶或组名是否属于 Gemini 4 Argon 系列专属配额桶（如 `gemini-argon-wtu-weekly`）
++#[inline]
++pub fn is_argon_bucket(group_name: &str, bucket_id: &str) -> bool {
++    let lower_group = group_name.to_ascii_lowercase();
++    let lower_bucket = bucket_id.to_ascii_lowercase();
++    lower_group.contains("argon")
++        || lower_bucket.contains("argon")
++        || lower_bucket.contains("gemini-argon-wtu-weekly")
++}
++
 +// ============================================================================
 +// Gemini 4 Argon 第一性原理 ThinkingConfig 终审守门员 (Gatekeeper)
 +// ============================================================================
@@ -945,6 +1122,12 @@ index 0000000..c8b9ccf
 +
 +    #[test]
 +    fn test_quota_summary_group_isolation() {
++        // is_argon_bucket 验证
++        assert!(is_argon_bucket("Gemini", "gemini-argon-wtu-weekly"));
++        assert!(is_argon_bucket("Argon Group", "default-bucket"));
++        assert!(!is_argon_bucket("Gemini", "gemini-3-pro-weekly"));
++        assert!(!is_argon_bucket("Claude", "claude-weekly"));
++
 +        // Argon 只匹配 Argon 桶，绝不匹配普通 Gemini 桶
 +        assert!(matches_quota_summary_group(
 +            "gemini-4-argon-high",
@@ -1305,8 +1488,199 @@ index 0000000..c8b9ccf
 +        );
 +    }
 +}
+diff --git a/src/components/accounts/AccountCard.tsx b/src/components/accounts/AccountCard.tsx
+index 2fcaa226..c174db7b 100644
+--- a/src/components/accounts/AccountCard.tsx
++++ b/src/components/accounts/AccountCard.tsx
+@@ -5,7 +5,7 @@ import { cn } from '../../utils/cn';
+ import { useTranslation } from 'react-i18next';
+ import { useConfigStore } from '../../stores/useConfigStore';
+ import { QuotaItem } from './QuotaItem';
+-import { MODEL_CONFIG, sortModels, getModelProtectionKey, resolveQuotaModels, ensurePinnedImageSelector } from '../../config/modelConfig';
++import { MODEL_CONFIG, sortModels, categorizeModel, getModelProtectionKey, resolveQuotaModels, ensurePinnedImageSelector } from '../../config/modelConfig';
+ import { getValidationBlockedStatusLabel } from './accountValidationStatus';
+ import { getLiveLimitForModel } from '../../utils/liveLimit';
+ import { getModelQuotaDisplay } from '../../utils/quotaDisplay';
+@@ -81,11 +81,12 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
+             // 但 DEFAULT_MODELS 是从 MODEL_CONFIG 生成的，我们需要确保它包含 shortLabel
+             // 这里为了安全，直接从 MODEL_CONFIG 获取
+             const fullConfig = MODEL_CONFIG[m.name.toLowerCase()];
++            const isArgon = categorizeModel(m.name) === 'gemini-argon';
+             return {
+                 id: m.name,
+-                label: m.display_name || fullConfig?.shortLabel || fullConfig?.label || m.name,
++                label: (!showAllQuotas && isArgon) ? 'Gemini 4 Argon' : (m.display_name || fullConfig?.shortLabel || fullConfig?.label || m.name),
+                 protectedKey: getModelProtectionKey(m.name) ?? fullConfig?.protectedKey ?? m.name,
+-                Icon: iconMap.get(m.name) || Bot,
++                Icon: iconMap.get(m.name) || fullConfig?.Icon || Bot,
+                 data: m
+             };
+         }) || [];
+@@ -112,7 +113,7 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
+                         if (selectorConfig) {
+                             models = [...models, {
+                                 id: sel.selectorId,
+-                                label: selectorConfig.shortLabel || selectorConfig.label,
++                                label: categorizeModel(sel.selectorId) === 'gemini-argon' ? 'Gemini 4 Argon' : (selectorConfig.shortLabel || selectorConfig.label),
+                                 protectedKey: selectorConfig.protectedKey,
+                                 Icon: selectorConfig.Icon,
+                                 data: { name: sel.selectorId, percentage: 0 } as ModelQuota,
+@@ -122,13 +123,18 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
+                 }
+             } else {
+                 // Default fallback: show known default models, plus we show all dynamic pinned models
+-                // 暂时退化：如果没有 config 就不阻拦了？不，没有 pinned 就显示内置+有 display_name 的。
+                 models = accountModels.filter(m => DEFAULT_MODELS.some(d => d.id === m.id) || m.data.display_name);
+             }
+         }
+ 
+         // 应用排序并过滤过期模型
+-        return sortModels(models).filter(m => m.id !== 'claude-sonnet-4-6-thinking' && m.id !== 'claude-sonnet-4-5-thinking' && m.id !== 'claude-opus-4-5-thinking');
++        const sorted = sortModels(models).filter(m => m.id !== 'claude-sonnet-4-6-thinking' && m.id !== 'claude-sonnet-4-5-thinking' && m.id !== 'claude-opus-4-5-thinking');
++        return !showAllQuotas
++            ? [
++                ...sorted.filter(m => categorizeModel(m.id) !== 'gemini-argon'),
++                ...sorted.filter(m => categorizeModel(m.id) === 'gemini-argon'),
++            ]
++            : sorted;
+     }, [config, account, showAllQuotas]);
+ 
+     // 解析周配额项 (当处于 weekly 视图时)
+diff --git a/src/components/accounts/AccountRow.tsx b/src/components/accounts/AccountRow.tsx
+index a2b5d2c3..508e1895 100644
+--- a/src/components/accounts/AccountRow.tsx
++++ b/src/components/accounts/AccountRow.tsx
+@@ -29,6 +29,7 @@ function AccountRow({ account, selected, onSelect, isCurrent, isRefreshing, isSw
+     // [重构] 按优先级查找配额模型
+     const geminiProModel = findQuotaModel(account.quota?.models, 'gemini-pro');
+     const geminiFlashModel = findQuotaModel(account.quota?.models, 'gemini-flash');
++    const geminiArgonModel = findQuotaModel(account.quota?.models, 'gemini-argon');
+ 
+     const geminiImageModel = findImageQuotaModel(account.quota?.models);
+     const imageProtectionKey = getModelProtectionKey(geminiImageModel?.name || '');
+@@ -302,6 +303,38 @@ function AccountRow({ account, selected, onSelect, isCurrent, isRefreshing, isSw
+                                 </span>
+                             </div>
+                         </div>
++
++                        {/* Gemini 4 Argon */}
++                        <div className="relative h-[22px] flex items-center px-1.5 rounded-md overflow-hidden border border-gray-100/50 dark:border-white/5 bg-gray-50/30 dark:bg-white/5 group/quota">
++                            {geminiArgonModel && (
++                                <div
++                                    className={`absolute inset-y-0 left-0 transition-all duration-700 ease-out opacity-15 dark:opacity-20 ${getColorClass(geminiArgonModel.percentage)}`}
++                                    style={{ width: `${geminiArgonModel.percentage}%` }}
++                                />
++                            )}
++                            <div className="relative z-10 w-full flex items-center text-[10px] font-mono leading-none">
++                                <span className="w-[64px] text-gray-500 dark:text-gray-400 font-bold pr-1 flex items-center gap-1" title="Gemini 4 Argon">
++                                    {account.protected_models?.includes('gemini-4-argon') && <Lock className="w-2.5 h-2.5 text-rose-500 shrink-0 z-10" />}
++                                    <span className="truncate">Gemini 4 Argon</span>
++                                </span>
++                                <div className="flex-1 flex justify-center">
++                                    {geminiArgonModel?.reset_time ? (
++                                        <span className={cn("flex items-center gap-0.5 font-medium transition-colors", getTimeColorClass(geminiArgonModel.reset_time))}>
++                                            <Clock className="w-2.5 h-2.5" />
++                                            {formatTimeRemaining(geminiArgonModel.reset_time)}
++                                        </span>
++                                    ) : (
++                                        <span className="text-gray-300 dark:text-gray-600 italic scale-90">N/A</span>
++                                    )}
++                                </div>
++                                <span className={cn("w-[36px] text-right font-bold transition-colors",
++                                    getQuotaColor(geminiArgonModel?.percentage || 0) === 'success' ? 'text-emerald-600 dark:text-emerald-400' :
++                                        getQuotaColor(geminiArgonModel?.percentage || 0) === 'warning' ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'
++                                )}>
++                                    {geminiArgonModel ? `${geminiArgonModel.percentage}%` : '-'}
++                                </span>
++                            </div>
++                        </div>
+                     </div>
+                 )}
+             </td>
+diff --git a/src/components/accounts/AccountTable.tsx b/src/components/accounts/AccountTable.tsx
+index 18101b61..936caebb 100644
+--- a/src/components/accounts/AccountTable.tsx
++++ b/src/components/accounts/AccountTable.tsx
+@@ -379,7 +379,7 @@ function AccountRowContent({
+ 
+     // 根据 show_all 状态决定显示哪些模型
+     const uniqueLabels = new Set<string>();
+-    const displayModels = sortModels(
++    const sortedModels = sortModels(
+         (showAllQuotas
+             ? (account.quota?.models || []).map(m => {
+                 const config = MODEL_CONFIG[m.name.toLowerCase()];
+@@ -395,14 +395,18 @@ function AccountRowContent({
+                 const selectorConfig = MODEL_CONFIG[sel.selectorId.toLowerCase()];
+                 const resolvedConfig = sel.model ? MODEL_CONFIG[sel.model.name.toLowerCase()] : undefined;
+                 if (!selectorConfig && !sel.model) return null;
+-                const label = sel.model?.display_name
+-                    || (resolvedConfig?.shortLabel || resolvedConfig?.label)
+-                    || (selectorConfig?.shortLabel || selectorConfig?.label)
+-                    || (resolvedConfig?.i18nKey ? t(resolvedConfig.i18nKey) : undefined)
+-                    || (selectorConfig?.i18nKey ? t(selectorConfig.i18nKey) : undefined)
+-                    || sel.selectorId;
++                const resolvedId = sel.model?.name.toLowerCase() ?? sel.selectorId.toLowerCase();
++                const isArgon = categorizeModel(resolvedId) === 'gemini-argon';
++                const label = isArgon
++                    ? 'Gemini 4 Argon'
++                    : (sel.model?.display_name
++                        || (resolvedConfig?.shortLabel || resolvedConfig?.label)
++                        || (selectorConfig?.shortLabel || selectorConfig?.label)
++                        || (resolvedConfig?.i18nKey ? t(resolvedConfig.i18nKey) : undefined)
++                        || (selectorConfig?.i18nKey ? t(selectorConfig.i18nKey) : undefined)
++                        || sel.selectorId);
+                 return {
+-                    id: sel.model?.name.toLowerCase() ?? sel.selectorId.toLowerCase(),
++                    id: resolvedId,
+                     label,
+                     protectedKey: getModelProtectionKey(sel.model?.name ?? sel.selectorId) ?? resolvedConfig?.protectedKey ?? selectorConfig?.protectedKey ?? sel.selectorId,
+                     data: sel.model,
+@@ -432,6 +436,15 @@ function AccountRowContent({
+         return self.findIndex(t => `${t.label}-${t.protectedKey}` === labelKey) === index;
+     });
+ 
++    // 在默认置顶双列网格 (!showAllQuotas) 中，确保 Gemini 4 Argon 位于第 2 行右列：
++    // 即 Gemini 2.5 Pro 正下方横向对齐，且与左侧 Claude Sonnet 4.6/Opus 5 水平对齐
++    const displayModels = !showAllQuotas
++        ? [
++            ...sortedModels.filter(m => categorizeModel(m.id) !== 'gemini-argon'),
++            ...sortedModels.filter(m => categorizeModel(m.id) === 'gemini-argon'),
++        ]
++        : sortedModels;
++
+ 
+     return (
+         <>
+diff --git a/src/components/dashboard/CurrentAccount.tsx b/src/components/dashboard/CurrentAccount.tsx
+index 73473b5a..03bb9829 100644
+--- a/src/components/dashboard/CurrentAccount.tsx
++++ b/src/components/dashboard/CurrentAccount.tsx
+@@ -39,6 +39,7 @@ function CurrentAccount({ account, quotaView = 'weighted', onSwitch }: CurrentAc
+     const isImageLiveLimited = Boolean(liveImageLimit && liveImageLimit.until > nowSeconds);
+ 
+     const claudeModel = findQuotaModel(account.quota?.models, 'claude');
++    const geminiArgonModel = findQuotaModel(account.quota?.models, 'gemini-argon');
+ 
+     // 辅助渲染单条模型配额（支持综合加权、5H、周配额及双向木桶约束标记）
+     const renderModelItem = (
+@@ -218,6 +219,14 @@ function CurrentAccount({ account, quotaView = 'weighted', onSwitch }: CurrentAc
+                     'cyan',
+                     Boolean(account.protected_models?.includes('claude'))
+                 )}
++
++                {/* Gemini 4 Argon 配额 */}
++                {geminiArgonModel && renderModelItem(
++                    geminiArgonModel,
++                    getModelDisplayName(geminiArgonModel, 'Gemini 4 Argon'),
++                    'emerald',
++                    Boolean(account.protected_models?.includes('gemini-4-argon'))
++                )}
+             </div>
+ 
+             {onSwitch && (
 diff --git a/src/config/modelConfig.ts b/src/config/modelConfig.ts
-index 8f27670..45508b8 100644
+index 8f276704..b85e83cb 100644
 --- a/src/config/modelConfig.ts
 +++ b/src/config/modelConfig.ts
 @@ -27,6 +27,47 @@ export interface ModelConfig {
@@ -1316,7 +1690,7 @@ index 8f27670..45508b8 100644
 +    // Gemini 4 Argon 系列
 +    'gemini-4-argon': {
 +        label: 'Gemini 4 Argon',
-+        shortLabel: 'G4 Argon',
++        shortLabel: 'Gemini 4 Argon',
 +        protectedKey: 'gemini-4-argon',
 +        Icon: Gemini.Color,
 +        i18nKey: 'proxy.model.pro_high',
@@ -1357,3 +1731,150 @@ index 8f27670..45508b8 100644
      // Gemini 3.x 系列
      'gemini-3.8-flash': {
          label: 'Gemini 3.8 Flash',
+diff --git a/src/utils/modelCategory.ts b/src/utils/modelCategory.ts
+index cd97f193..44c425e7 100644
+--- a/src/utils/modelCategory.ts
++++ b/src/utils/modelCategory.ts
+@@ -2,13 +2,14 @@
+  * 模型分类工具函数（无 React / icons 依赖，可在 Node 环境直接导入）
+  */
+ 
+-export type ModelCategory = 'gemini-pro' | 'gemini-flash' | 'gemini-pro-image' | 'gemini-flash-image' | 'claude' | 'other';
++export type ModelCategory = 'gemini-argon' | 'gemini-pro' | 'gemini-flash' | 'gemini-pro-image' | 'gemini-flash-image' | 'claude' | 'other';
+ 
+ export function categorizeModel(name: string): ModelCategory {
+     const n = name.trim().toLowerCase();
+     const isGemini = n.startsWith('gemini-');
+     const isImage = (isGemini && n.includes('image')) || n.startsWith('image') || n.startsWith('imagen');
+     if (isImage) return n.includes('flash') ? 'gemini-flash-image' : 'gemini-pro-image';
++    if (n.includes('argon') || (isGemini && n.startsWith('gemini-4'))) return 'gemini-argon';
+     if (isGemini && n.includes('flash')) return 'gemini-flash';
+     if (isGemini && n.includes('pro')) return 'gemini-pro';
+     if (n.includes('claude') || n.includes('opus') || n.includes('sonnet') || n.includes('haiku')) return 'claude';
+@@ -21,6 +22,10 @@ export interface ModelDisplayNameInput {
+ }
+ 
+ const DEFAULT_MODEL_LABELS: Record<string, string> = {
++    'gemini-4-argon': 'Gemini 4 Argon',
++    'gemini-4-argon-high': 'Gemini 4 Argon',
++    'gemini-4-argon-medium': 'Gemini 4 Argon',
++    'gemini-4-argon-low': 'Gemini 4 Argon',
+     'gemini-pro-agent': 'gemini-3.1-pro-high',
+     'gemini-3.1-pro-high': 'gemini-3.1-pro-high',
+     'gemini-3.1-pro': 'gemini-3.1-pro',
+@@ -62,6 +67,7 @@ export function findQuotaModel<T extends { name: string }>(
+ ): T | undefined {
+     if (!models || models.length === 0) return undefined;
+     const preferred: Partial<Record<ModelCategory, string[]>> = {
++        'gemini-argon': ['gemini-4-argon', 'gemini-4-argon-high', 'gemini-4-argon-medium', 'gemini-4-argon-low'],
+         'gemini-pro': ['gemini-pro-agent', 'gemini-3.1-pro-high', 'gemini-3.1-pro', 'gemini-3.1-pro-low'],
+         'gemini-flash': ['gemini-3.8-flash-high', 'gemini-3.8-flash', 'gemini-3-flash-agent', 'gemini-3-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite'],
+         'claude': ['claude-sonnet-4-6', 'claude-opus-4-6-thinking'],
+@@ -78,6 +84,7 @@ export function findQuotaModel<T extends { name: string }>(
+ 
+ export function getModelProtectionKey(name: string): string | null {
+     switch (categorizeModel(name)) {
++        case 'gemini-argon': return 'gemini-4-argon';
+         case 'gemini-flash': return 'gemini-3-flash';
+         case 'gemini-pro': return 'gemini-3-pro-high';
+         case 'gemini-flash-image': return 'gemini-3.1-flash-image';
+@@ -101,8 +108,9 @@ export function findImageQuotaModel<T extends { name: string }>(
+     });
+ }
+ 
+-/** 账号管理 pin 列表缺省图像选择器时补入代表 Image，与仪表盘对齐。 */
++/** 账号管理 pin 列表缺省图像选择器与 Argon 选择器时自动补入，确保 4 格配额完整对齐。 */
+ export const DEFAULT_IMAGE_PIN_SELECTOR = 'gemini-3.1-flash-image';
++export const DEFAULT_ARGON_PIN_SELECTOR = 'gemini-4-argon';
+ 
+ export function ensurePinnedImageSelector(selectorIds: string[] | undefined): string[] {
+     const pinned = selectorIds ? [...selectorIds] : [];
+@@ -110,8 +118,13 @@ export function ensurePinnedImageSelector(selectorIds: string[] | undefined): st
+         const category = categorizeModel(id);
+         return category === 'gemini-flash-image' || category === 'gemini-pro-image';
+     });
+-    if (hasImage) return pinned;
+-    pinned.push(DEFAULT_IMAGE_PIN_SELECTOR);
++    if (!hasImage) {
++        pinned.push(DEFAULT_IMAGE_PIN_SELECTOR);
++    }
++    const hasArgon = pinned.some(id => categorizeModel(id) === 'gemini-argon');
++    if (!hasArgon) {
++        pinned.push(DEFAULT_ARGON_PIN_SELECTOR);
++    }
+     return pinned;
+ }
+ 
+@@ -133,10 +146,11 @@ export function resolveQuotaModels<T extends { name: string }>(
+         const category = categorizeModel(normalizedId);
+ 
+         const isImage = category === 'gemini-pro-image' || category === 'gemini-flash-image';
++        const isArgon = category === 'gemini-argon';
+ 
+         // Exact-match first: a pinned id that names a real quota model must render
+-        // that model, not collapse into its category slot.
+-        const exact = !isImage
++        // that model, not collapse into its category slot (except shared image/argon category selectors).
++        const exact = (!isImage && !isArgon)
+             ? models?.find(m => m.name.trim().toLowerCase() === normalizedId)
+             : undefined;
+         if (exact) {
+diff --git a/src/utils/quotaDisplay.ts b/src/utils/quotaDisplay.ts
+index 8db0e641..7f6b0341 100644
+--- a/src/utils/quotaDisplay.ts
++++ b/src/utils/quotaDisplay.ts
+@@ -29,22 +29,32 @@ export interface ConstrainedQuotaResult {
+ export function getModelQuotaDisplay(modelId: string, model: ModelQuota | undefined, groups: QuotaGroup[] = []) {
+     const name = modelId.toLowerCase();
+     const thirdParty = name.startsWith('claude') || name.startsWith('gpt');
++    const isArgon = name.includes('argon') || name.startsWith('gemini-4');
+     const buckets = (groups || []).filter(group => {
+         const groupName = (group?.display_name || '').toLowerCase();
+         const isThirdParty = /claude|gpt|3p/.test(groupName)
+             || (group?.buckets || []).some(bucket => bucket?.bucket_id?.toLowerCase().includes('3p'));
+-        return thirdParty ? isThirdParty : name.startsWith('gemini') && !isThirdParty;
++        const isArgonGroup = /argon/.test(groupName)
++            || (group?.buckets || []).some(bucket => bucket?.bucket_id?.toLowerCase().includes('argon'));
++        if (thirdParty) return isThirdParty;
++        if (isArgon) return isArgonGroup;
++        return name.startsWith('gemini') && !isThirdParty && !isArgonGroup;
+     }).flatMap(group => group?.buckets || []);
+     const fiveHour = buckets.filter(bucket => /5h|hour/i.test(`${bucket.window} ${bucket.bucket_id}`))
+         .reduce<(typeof buckets)[number] | undefined>((chosen, bucket) =>
+             !chosen || bucket.remaining_fraction < chosen.remaining_fraction ? bucket : chosen, undefined);
++    const argonBucket = isArgon
++        ? buckets.reduce<(typeof buckets)[number] | undefined>((chosen, bucket) =>
++            !chosen || bucket.remaining_fraction < chosen.remaining_fraction ? bucket : chosen, undefined)
++        : undefined;
+     const weekly = buckets.filter(bucket => /week|7d/i.test(`${bucket.window} ${bucket.bucket_id}`)
+         && bucket.remaining_fraction <= 0.001 && Date.parse(bucket.reset_time) > Date.now())
+         .reduce<(typeof buckets)[number] | undefined>((chosen, bucket) =>
+             !chosen || Date.parse(bucket.reset_time) > Date.parse(chosen.reset_time) ? bucket : chosen, undefined);
++    const activeBucket = fiveHour || argonBucket;
+     return {
+-        percentage: weekly ? 0 : fiveHour ? Math.round(fiveHour.remaining_fraction * 100) : (model?.percentage ?? 0),
+-        resetTime: weekly?.reset_time || fiveHour?.reset_time || model?.reset_time,
++        percentage: weekly ? 0 : activeBucket ? Math.round(activeBucket.remaining_fraction * 100) : (model?.percentage ?? 0),
++        resetTime: weekly?.reset_time || activeBucket?.reset_time || model?.reset_time,
+         isWeeklyConstrained: !!weekly,
+         weeklyResetTime: weekly?.reset_time,
+     };
+@@ -61,12 +71,17 @@ export function getModelConstrainedQuota(
+ ): ConstrainedQuotaResult {
+     const name = modelId.toLowerCase();
+     const thirdParty = name.startsWith('claude') || name.startsWith('gpt');
++    const isArgon = name.includes('argon') || name.startsWith('gemini-4');
+ 
+     const buckets = (groups || []).filter(group => {
+         const groupName = (group?.display_name || '').toLowerCase();
+         const isThirdParty = /claude|gpt|3p/.test(groupName)
+             || (group?.buckets || []).some(bucket => bucket?.bucket_id?.toLowerCase().includes('3p'));
+-        return thirdParty ? isThirdParty : name.startsWith('gemini') && !isThirdParty;
++        const isArgonGroup = /argon/.test(groupName)
++            || (group?.buckets || []).some(bucket => bucket?.bucket_id?.toLowerCase().includes('argon'));
++        if (thirdParty) return isThirdParty;
++        if (isArgon) return isArgonGroup;
++        return name.startsWith('gemini') && !isThirdParty && !isArgonGroup;
+     }).flatMap(group => group?.buckets || []);
+ 
+     const fiveHourBucket = buckets.filter(bucket => /5h|hour/i.test(`${bucket?.window || ''} ${bucket?.bucket_id || ''}`))

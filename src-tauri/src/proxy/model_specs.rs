@@ -414,6 +414,28 @@ pub fn is_claude_v5_or_above(model: &str) -> bool {
     false
 }
 
+/// 检查是否为 Gemini >= 4.0 (含 Gemini 4 Argon 系列) 高阶模型
+pub fn is_gemini_v4_or_above(model: &str) -> bool {
+    if crate::utils::ponytail::is_argon_model(model) {
+        return true;
+    }
+    let lower = model.to_lowercase();
+    if !lower.contains("gemini") {
+        return false;
+    }
+    if let Some(idx) = lower.find("gemini-") {
+        let rest = &lower[idx + "gemini-".len()..];
+        let version_part: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
+        if let Ok(ver) = version_part.parse::<f32>() {
+            return ver >= 4.0;
+        }
+    }
+    lower.contains("gemini-4") || lower.contains("gemini-5")
+}
+
 /// 检查是否为 Claude >= 5.0 的裸模型（无 -low, -medium, -high 等档位或特性后缀）
 pub fn is_bare_claude_tiered_model(model: &str) -> bool {
     let lower = model.to_lowercase();

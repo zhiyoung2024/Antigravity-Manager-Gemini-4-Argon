@@ -30,7 +30,7 @@ export const MODEL_CONFIG: Record<string, ModelConfig> = {
     // Gemini 4 Argon 系列
     'gemini-4-argon': {
         label: 'Gemini 4 Argon',
-        shortLabel: 'G4 Argon',
+        shortLabel: 'Gemini 4 Argon',
         protectedKey: 'gemini-4-argon',
         Icon: Gemini.Color,
         i18nKey: 'proxy.model.pro_high',
